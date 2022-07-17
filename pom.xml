@@ -16,6 +16,10 @@
 	<properties>
 		<java.version>17</java.version>
 	</properties>
+	<modules>
+		<module>publisher</module>
+		<module>subscriber</module>
+	</modules>
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
