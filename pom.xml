@@ -13,9 +13,16 @@
 	<version>0.0.1-SNAPSHOT</version>
 	<name>rabbitmq</name>
 	<description>rabbitmq</description>
+	<packaging>pom</packaging>
 	<properties>
 		<java.version>17</java.version>
 	</properties>
+
+	<modules>
+		<module>subscriber</module>
+		<module>publisher</module>
+	</modules>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
