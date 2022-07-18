@@ -1,24 +1,26 @@
 package uz.jl.subscriber;
 
 import lombok.*;
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.TopicExchange;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
-import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.support.converter.StringJsonMessageConverter;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.util.HashMap;
+import java.util.Map;
 
 
 @EnableRabbit
@@ -32,50 +34,47 @@ public class SubscriberApplication {
 }
 
 @Configuration
-class RabbitMQConfig {
-    public static final String QUEUE = "pdp_queue";
-    public static final String EXCHANGE = "pdp_exchange";
-    public static final String ROUTING_KEY = "pdp_routing_key";
+class KafkaConsumerConfig {
+    @Value("${kafka.server}")
+    private String bootstrapServers;
 
     @Bean
-    public Queue queue() {
-        return new Queue(QUEUE);
+    public ConsumerFactory<String, Transaction> consumerFactory() {
+        Map<String, Object> config = new HashMap<>();
+        JsonDeserializer<Transaction> deserializer = new JsonDeserializer<>(Transaction.class);
+
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, "group_id");
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserializer);
+        return new DefaultKafkaConsumerFactory<>(config, new StringDeserializer(), deserializer);
     }
 
     @Bean
-    public TopicExchange exchange() {
-        return new TopicExchange(EXCHANGE);
-    }
-
-
-    @Bean
-    public Binding binding(Queue queue, TopicExchange exchange) {
-        return BindingBuilder
-                .bind(queue)
-                .to(exchange)
-                .with(ROUTING_KEY);
+    public ConcurrentKafkaListenerContainerFactory<String, Transaction> transactionConcurrentKafkaListenerContainerFactory() {
+        ConcurrentKafkaListenerContainerFactory<String, Transaction> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory());
+        return factory;
     }
 
     @Bean
-    public MessageConverter messageConverter() {
-        return new Jackson2JsonMessageConverter();
+    public StringJsonMessageConverter jsonConverter() {
+        return new StringJsonMessageConverter();
     }
+}
 
-    @Bean
-    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
-        RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
-        rabbitTemplate.setMessageConverter(messageConverter());
-        return rabbitTemplate;
-    }
-
+class Constants {
+    public static final String TOPIC = "pdp-topic";
+    public static final String GROUP_ID = "group-id";
 }
 
 @Component
 class TransactionListener {
 
-    @RabbitListener(queues = RabbitMQConfig.QUEUE)
-    public void logTransaction(Transaction transaction) {
-        System.out.println(transaction);
+
+    @KafkaListener(topics = Constants.TOPIC, groupId = Constants.GROUP_ID)
+    public void listen(Transaction transaction) {
+        System.out.println("Received Message : " + transaction);
     }
 }
 

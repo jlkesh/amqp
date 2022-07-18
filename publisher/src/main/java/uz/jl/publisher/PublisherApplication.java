@@ -1,18 +1,11 @@
 package uz.jl.publisher;
 
+import com.fasterxml.jackson.databind.ser.std.StringSerializer;
 import lombok.*;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.Formula;
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.TopicExchange;
-import org.springframework.amqp.rabbit.annotation.EnableRabbit;
-import org.springframework.amqp.rabbit.annotation.Exchange;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
-import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -20,9 +13,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.http.HttpStatus;
+import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.*;
-
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -30,12 +28,11 @@ import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
-import java.time.ZonedDateTime;
-import java.util.Date;
-import java.util.Objects;
+import java.util.HashMap;
+import java.util.Map;
 
 @SpringBootApplication
-@EnableRabbit
+@EnableKafka
 public class PublisherApplication {
 
     public static void main(String[] args) {
@@ -90,7 +87,8 @@ interface TransactionRepository extends JpaRepository<Transaction, Long> {
 class TransactionService {
 
     private final TransactionRepository repository;
-    private final RabbitMQService rabbitMQService;
+    private final KafkaService kafkaService;
+
 
     public Transaction create(TransferCreateVO vo) {
         Transaction transaction = Transaction.builder()
@@ -98,7 +96,7 @@ class TransactionService {
                 .amount(vo.getAmount())
                 .build();
         transaction = repository.save(transaction);
-        rabbitMQService.send(transaction);
+        kafkaService.send(transaction);
         return transaction;
     }
 }
@@ -119,53 +117,35 @@ class PublisherController {
 }
 
 @Configuration
-class RabbitMQConfig {
-    public static final String QUEUE = "pdp_queue";
-    public static final String EXCHANGE = "pdp_exchange";
-    public static final String ROUTING_KEY = "pdp_routing_key";
+class KafkaProducerConfig {
+
+    @Value("${kafka.server}")
+    private String bootstrapServers;
 
     @Bean
-    public Queue queue() {
-        return new Queue(QUEUE);
+    public ProducerFactory<String, Object> producerFactory() {
+        Map<String, Object> configProps = new HashMap<>();
+        configProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, org.apache.kafka.common.serialization.StringSerializer.class);
+        configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
+        return new DefaultKafkaProducerFactory<>(configProps);
     }
 
     @Bean
-    public TopicExchange exchange() {
-        return new TopicExchange(EXCHANGE);
-    }
-
-
-    @Bean
-    public Binding binding(Queue queue, TopicExchange exchange) {
-        return BindingBuilder
-                .bind(queue)
-                .to(exchange)
-                .with(ROUTING_KEY);
-    }
-
-    @Bean
-    public MessageConverter messageConverter() {
-        return new Jackson2JsonMessageConverter();
-    }
-
-    @Bean
-    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
-        RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
-        rabbitTemplate.setMessageConverter(messageConverter());
-        return rabbitTemplate;
+    public KafkaTemplate<String, Object> kafkaTemplate() {
+        return new KafkaTemplate<>(producerFactory());
     }
 
 }
 
 @Service
 @RequiredArgsConstructor
-class RabbitMQService {
+class KafkaService {
 
-    private final RabbitTemplate rabbitTemplate;
+    public final String TOPIC = "pdp-topic";
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    public void send(Object message) {
-        rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE, RabbitMQConfig.ROUTING_KEY, message);
+    public void send(Transaction message) {
+        kafkaTemplate.send(TOPIC, message);
     }
-
-
 }
